@@ -80,3 +80,29 @@ button {
   margin-top: 20px;
   font-size: 20px;
 }
+
+@keyframes scoreFloat {
+  0% { 
+    opacity: 1; 
+    transform: translateY(0);
+  }
+  100% { 
+    opacity: 0; 
+    transform: translateY(-50px);
+  }
+}
+
+@keyframes messageFlash {
+  0% { 
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+  100% { 
+    opacity: 0;
+    transform: scale(1);
+  }
+}

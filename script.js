@@ -8,12 +8,16 @@ let gameArea = document.getElementById("game");
 let player = document.getElementById("player");
 let alliesContainer = document.getElementById("allies");
 let keysPressed = {};
+let lastShotTime = 0;
+let score = 0;
+let lastAllyScore = 0;
+let lastBombScore = 0;
 
 function updateTimer() {
   if (!gameRunning) return;
   const now = performance.now();
   const elapsed = ((now - startTime) / 1000).toFixed(2);
-  document.getElementById("timer").textContent = `${elapsed}秒`;
+  document.getElementById("timer").innerHTML = `${elapsed}秒 <span style="color: yellow;">Score: ${score}</span>`;
 }
 
 function createChar(char, x, y, className = "char", parent = gameArea) {
@@ -28,11 +32,20 @@ function createChar(char, x, y, className = "char", parent = gameArea) {
 
 function createAlly(x) {
   const el = createChar("大", x, 580, "char", alliesContainer);
-  allies.push({ el, x, dir: Math.random() < 0.5 ? -1 : 1 });
+  allies.push({ 
+    el, 
+    x, 
+    dir: Math.random() < 0.5 ? -1 : 1,
+    speed: 0.3 + Math.random() * 0.7,
+    nextDirChange: Date.now() + 1000 + Math.random() * 3000
+  });
 }
 
 function shootBullet() {
   if (!gameRunning) return;
+  const now = Date.now();
+  if (now - lastShotTime < 150) return;
+  lastShotTime = now;
   const rect = player.getBoundingClientRect();
   const gameRect = gameArea.getBoundingClientRect();
   const bulletX = rect.left - gameRect.left + rect.width / 2 - 10;
@@ -43,9 +56,24 @@ function shootBullet() {
 
 function spawnEnemy() {
   const x = Math.random() * (gameArea.clientWidth - 20);
-  const speed = 0.25 + Math.random() * 1.75;
-  const el = createChar("@", x, 0);
-  enemies.push({ el, x, y: 0, speed });
+  const enemyType = Math.random();
+  
+  if (enemyType < 0.7) {
+    const speed = 0.25 + Math.random() * 1.75;
+    const el = createChar("@", x, 0);
+    enemies.push({ el, x, y: 0, speed, type: "normal", points: 10 });
+  } else if (enemyType < 0.9) {
+    const speed = 2.5 + Math.random() * 1.5;
+    const el = createChar("*", x, 0);
+    el.style.color = "yellow";
+    enemies.push({ el, x, y: 0, speed, type: "fast", points: 30 });
+  } else {
+    const speed = 0.15 + Math.random() * 0.35;
+    const el = createChar("■", x, 0);
+    el.style.color = "red";
+    el.style.fontSize = "32px";
+    enemies.push({ el, x, y: 0, speed, type: "heavy", health: 3, points: 50 });
+  }
 }
 
 function explodeParts(x, y) {
@@ -59,6 +87,62 @@ function explodeParts(x, y) {
     part.style.setProperty("--y", `${dy}px`);
     setTimeout(() => part.remove(), 600);
   });
+}
+
+function showScore(x, y, points) {
+  const scoreEl = createChar(`+${points}`, x, y, "char");
+  scoreEl.style.color = points >= 50 ? "gold" : points >= 30 ? "yellow" : "white";
+  scoreEl.style.fontSize = "16px";
+  scoreEl.style.zIndex = "1000";
+  scoreEl.style.animation = "scoreFloat 1s ease-out forwards";
+  setTimeout(() => scoreEl.remove(), 1000);
+}
+
+function checkScoreEvents() {
+  if (Math.floor(score / 500) > Math.floor(lastBombScore / 500)) {
+    clearAllEnemies();
+    showMessage("全敵撃破！", "gold");
+    lastBombScore = score;
+    lastAllyScore = score;
+  } else if (Math.floor(score / 100) > Math.floor(lastAllyScore / 100)) {
+    const playerX = parseFloat(player.style.left || "180");
+    const newAllyX = playerX + (Math.random() - 0.5) * 200;
+    createAlly(Math.max(0, Math.min(376, newAllyX)));
+    showMessage("味方追加！", "lightgreen");
+    lastAllyScore = score;
+  }
+}
+
+function showMessage(text, color) {
+  const messageEl = createChar(text, 200, 250, "char");
+  messageEl.style.color = color;
+  messageEl.style.fontSize = "32px";
+  messageEl.style.fontWeight = "bold";
+  messageEl.style.width = "100%";
+  messageEl.style.textAlign = "center";
+  messageEl.style.left = "0";
+  messageEl.style.zIndex = "2000";
+  messageEl.style.animation = "messageFlash 1.5s ease-out forwards";
+  setTimeout(() => messageEl.remove(), 1500);
+}
+
+function clearAllEnemies() {
+  enemies.forEach(e => {
+    e.el.classList.add("explode");
+    setTimeout(() => e.el.remove(), 300);
+    const bombParts = ["*", "*", "*", "*"];
+    bombParts.forEach((char, i) => {
+      const angle = (Math.PI * 2 * i) / bombParts.length;
+      const dx = Math.cos(angle) * 150;
+      const dy = Math.sin(angle) * 150;
+      const part = createChar(char, e.x, e.y, "part");
+      part.style.color = "gold";
+      part.style.setProperty("--x", `${dx}px`);
+      part.style.setProperty("--y", `${dy}px`);
+      setTimeout(() => part.remove(), 600);
+    });
+  });
+  enemies = [];
 }
 
 function updateGame() {
@@ -81,14 +165,31 @@ function updateGame() {
     return true;
   });
 
-  enemies.forEach(e => {
+  enemies = enemies.filter(e => {
     e.y += e.speed;
     e.el.style.top = `${e.y}px`;
+    if (e.y > gameArea.clientHeight) {
+      e.el.remove();
+      return false;
+    }
+    return true;
   });
 
   allies.forEach(a => {
-    a.x += 0.5 * a.dir;
-    if (a.x <= 0 || a.x >= 376) a.dir *= -1;
+    const now = Date.now();
+    if (now > a.nextDirChange) {
+      if (Math.random() < 0.3) {
+        a.dir *= -1;
+      }
+      a.speed = 0.3 + Math.random() * 0.7;
+      a.nextDirChange = now + 1000 + Math.random() * 3000;
+    }
+    
+    a.x += a.speed * a.dir;
+    if (a.x <= 0 || a.x >= 376) {
+      a.dir *= -1;
+      a.x = Math.max(0, Math.min(376, a.x));
+    }
     a.el.style.left = `${a.x}px`;
   });
 
@@ -100,12 +201,23 @@ function updateGame() {
       const dx = b.x - e.x;
       const dy = b.y - e.y;
       if (Math.abs(dx) < 20 && Math.abs(dy) < 20) {
-        e.el.classList.add("explode");
-        b.el.classList.add("explode");
-        setTimeout(() => e.el.remove(), 300);
-        setTimeout(() => b.el.remove(), 300);
-        enemiesToRemove.push(ei);
-        bulletsToRemove.push(bi);
+        if (e.type === "heavy" && e.health > 1) {
+          e.health--;
+          e.el.style.opacity = e.health / 3;
+          b.el.classList.add("explode");
+          setTimeout(() => b.el.remove(), 300);
+          bulletsToRemove.push(bi);
+        } else {
+          e.el.classList.add("explode");
+          b.el.classList.add("explode");
+          setTimeout(() => e.el.remove(), 300);
+          setTimeout(() => b.el.remove(), 300);
+          enemiesToRemove.push(ei);
+          bulletsToRemove.push(bi);
+          score += e.points || 10;
+          showScore(e.x, e.y, e.points || 10);
+          checkScoreEvents();
+        }
       }
     });
   });
@@ -132,6 +244,9 @@ function updateGame() {
       e.el.classList.add("explode");
       setTimeout(() => e.el.remove(), 300);
       enemyRemovalList.push(ei);
+      score += e.points || 10;
+      showScore(e.x, e.y, e.points || 10);
+      checkScoreEvents();
     }
 
     allies.forEach((a, ai) => {
@@ -170,6 +285,10 @@ function startGame() {
   startTime = performance.now();
   timerInterval = setInterval(updateTimer, 10);
   gameRunning = true;
+  score = 0;
+  lastShotTime = 0;
+  lastAllyScore = 0;
+  lastBombScore = 0;
   const playerX = parseFloat(player.style.left || "180");
   [playerX - 60, playerX - 20, playerX + 20, playerX + 60].forEach(x => createAlly(x));
   spawnLoop(1);
@@ -201,9 +320,9 @@ function gameOver() {
   
   if (elapsedFloat > highScoreFloat) {
     localStorage.setItem("highScore", elapsed);
-    document.getElementById("survivalTime").innerHTML = `生存時間 ${elapsed}秒<br><span style="color: yellow;">新記録！</span><br>最長生存時間: ${elapsed}秒`;
+    document.getElementById("survivalTime").innerHTML = `生存時間 ${elapsed}秒<br><span style="color: yellow;">新記録！</span><br>最長生存時間: ${elapsed}秒<br>スコア: ${score}`;
   } else {
-    document.getElementById("survivalTime").innerHTML = `生存時間 ${elapsed}秒<br>最長生存時間: ${highScore}秒`;
+    document.getElementById("survivalTime").innerHTML = `生存時間 ${elapsed}秒<br>最長生存時間: ${highScore}秒<br>スコア: ${score}`;
   }
   
   enemies.forEach(e => e.el.remove());
